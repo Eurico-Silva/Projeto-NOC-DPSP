@@ -1,0 +1,11 @@
+.streamlit/secrets.toml
+central_comando.db
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+.DS_Store
