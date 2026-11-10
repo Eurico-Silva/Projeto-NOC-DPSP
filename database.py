@@ -4,6 +4,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 from pathlib import Path
 
+# Váriavel obrigatória exigida pelo modulo authorization.py
+DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
+
 # Configuração da URL estruturada isolando os parâmetros de rede e keepalive contra erros de fatiamento
 db_url_object = URL.create(
     drivername="postgresql+psycopg2",
