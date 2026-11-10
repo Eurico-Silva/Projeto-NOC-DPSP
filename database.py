@@ -1,20 +1,25 @@
 import os
 import streamlit as st
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from pathlib import Path
 
 # Mantido para compatibilidade com outros arquivos do sistema que importam essa variável
 DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
 
-# Configuração da Conexão (Nuvem ou Local)
-if st.secrets.get("DB_URL"):
-    DB_URL = st.secrets["DB_URL"]
-else:
-    # URL oficial usando o Pooler estável com SSL obrigatório
-    DB_URL = "postgresql+psycopg2://postgres.kugjdeaurrthelsksncq:Passagemdeturno@://supabase.com"
+# Criando a URL de conexão de forma estruturada usando o seu endereço completo
+db_url_object = URL.create(
+    drivername="postgresql+psycopg2",
+    username="postgres",
+    password="Passagemdeturno",
+    host="db.kugjdeaurrthelsksncq.supabase.co",
+    port=5432,
+    database="postgres",
+    query={"sslmode": "require"}
+)
 
-# Cria o motor de conexão do SQLAlchemy
-engine = create_engine(DB_URL, pool_pre_ping=True)
+# Cria o motor de conexão do SQLAlchemy usando o objeto seguro
+engine = create_engine(db_url_object, pool_pre_ping=True)
 
 
 class PostgresCursorAdapter:
