@@ -7,13 +7,13 @@ from pathlib import Path
 # Váriavel obrigatória exigida pelo modulo authorization.py
 DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
 
-# Configuração da URL estruturada utilizando o driver moderno psycopg (v3) compatível com Python 3.14
+# Configuração da URL utilizando a porta dedicada do Session Pooler do Supabase
 db_url_object = URL.create(
     drivername="postgresql+psycopg",
     username="postgres.kugjdeaurrthelsksncq",
     password="Passagemdeturno",
     host="://supabase.com",
-    port=5432,
+    port=6543,
     database="postgres",
     query={
         "sslmode": "require",
@@ -24,7 +24,7 @@ db_url_object = URL.create(
     }
 )
 
-# Instancia o motor clássico e estável do SQLAlchemy
+# Instancia o motor do SQLAlchemy de forma explícita e estável
 engine = create_engine(db_url_object, pool_size=5, max_overflow=10, pool_pre_ping=True, pool_recycle=1800)
 
 class PostgresCursorAdapter:
