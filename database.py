@@ -1,17 +1,28 @@
 import os
 import streamlit as st
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from pathlib import Path
 
-# Lê a URL com Keepalives configurada nas Secrets do Streamlit Cloud
-if st.secrets.get("DB_URL"):
-    DB_URL = st.secrets["DB_URL"]
-else:
-    # Fallback estável para rodar localmente se precisar
-    DB_URL = "postgresql+psycopg2://postgres.kugjdeaurrthelsksncq:Passagemdeturno@://supabase.com"
+# Configuração da URL estruturada isolando os parâmetros de rede e keepalive contra erros de fatiamento
+db_url_object = URL.create(
+    drivername="postgresql+psycopg2",
+    username="postgres.kugjdeaurrthelsksncq",
+    password="Passagemdeturno",
+    host="://supabase.com",
+    port=5432,
+    database="postgres",
+    query={
+        "sslmode": "require",
+        "keepalives": "1",
+        "keepalives_idle": "30",
+        "keepalives_interval": "10",
+        "keepalives_count": "5"
+    }
+)
 
-# Instancia o motor limpando conexões fantasmas e testando a rede antes de executar queries
-engine = create_engine(DB_URL, pool_size=5, max_overflow=10, pool_pre_ping=True, pool_recycle=1800)
+# Instancia o motor do SQLAlchemy de forma explícita e isolada
+engine = create_engine(db_url_object, pool_size=5, max_overflow=10, pool_pre_ping=True, pool_recycle=1800)
 
 class PostgresCursorAdapter:
     """Classe adaptadora para imitar o comportamento do cursor do SQLite no PostgreSQL"""
