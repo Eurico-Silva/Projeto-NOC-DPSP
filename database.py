@@ -26,6 +26,7 @@ def init_db():
             rua TEXT,
             bairro TEXT,
             estado TEXT,
+            email_loja TEXT,
             tipo_unidade TEXT,
             tipo_link TEXT,
             operadora TEXT,
@@ -33,6 +34,10 @@ def init_db():
             impacto TEXT,
             protocolo TEXT,
             status TEXT,
+            solicitacao_4g TEXT,
+            protocolo_4g TEXT,
+            status_chamado_4g TEXT,
+            observacao_4g TEXT,
             observacoes_encerramento TEXT,
             turno TEXT,
             data_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -46,6 +51,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS lojas_gnet (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             unidade TEXT,
+            nome_unidade TEXT,
+            estado TEXT,
             motivo TEXT,
             modelo_fortinet TEXT,
             ip_balcao TEXT,
@@ -243,13 +250,20 @@ def init_db():
             "rua": "TEXT",
             "bairro": "TEXT",
             "estado": "TEXT",
+            "email_loja": "TEXT",
             "tipo_unidade": "TEXT",
             "circuito_afetado": "TEXT",
+            "solicitacao_4g": "TEXT",
+            "protocolo_4g": "TEXT",
+            "status_chamado_4g": "TEXT",
+            "observacao_4g": "TEXT",
             "observacoes_encerramento": "TEXT",
             "data_atualizacao": "TIMESTAMP",
             "data_resolucao": "TIMESTAMP",
         },
         "lojas_gnet": {
+            "nome_unidade": "TEXT",
+            "estado": "TEXT",
             "chamado_redes": "TEXT",
             "observacao_dano": "TEXT",
             "observacoes_encerramento": "TEXT",
@@ -331,6 +345,11 @@ def init_db():
     cursor.execute(
         """UPDATE problemas_glpi SET status = 'Em andamento'
            WHERE status = 'Ativo / Aberto'"""
+    )
+    cursor.execute(
+        """UPDATE lojas_gnet
+           SET status = 'Em avaliação pelo time de redes'
+           WHERE status = 'Em andamento'"""
     )
 
     cursor.execute(

@@ -17,6 +17,12 @@ from authorization import (
     user_count,
 )
 from database import DB_NAME, init_db
+from store_catalog import (
+    find_store,
+    find_store_catalog_path,
+    read_store_catalog,
+    save_store_catalog,
+)
 
 # Inicializa o banco de dados
 init_db()
@@ -150,7 +156,7 @@ STATUS_OPTIONS = {
     "conectividade": ["Pendente", "Em andamento", "Resolvido"],
     "lojas_gnet": [
         "Aguardando solução do time de redes",
-        "Em andamento",
+        "Em avaliação pelo time de redes",
         "Resolvido",
     ],
     "infra_local": ["Pendente", "Em andamento", "Resolvido"],
@@ -179,7 +185,39 @@ RESOLVED_STATUSES = {
     "Resolvido após acionamento",
     "Fechado sem solução definitiva",
 }
-RESOLUTION_NOTES_REQUIRED = {"conectividade", "infra_local"}
+RESOLUTION_NOTES_REQUIRED = {"infra_local"}
+CONNECTIVITY_AUTOFILL_KEYS = {
+    "name": "connectivity_store_name",
+    "address": "connectivity_store_address",
+    "district": "connectivity_store_district",
+    "state": "connectivity_store_state",
+    "email": "connectivity_store_email",
+}
+
+
+@st.cache_data(show_spinner=False)
+def load_store_catalog(file_content):
+    return read_store_catalog(file_content)
+
+
+def autofill_connectivity_store(catalog, columns):
+    store = find_store(
+        catalog,
+        columns,
+        st.session_state.get("connectivity_unit", ""),
+    )
+    for field, key in CONNECTIVITY_AUTOFILL_KEYS.items():
+        st.session_state[key] = store[field] if store else ""
+
+
+def autofill_gnet_store(catalog, columns):
+    store = find_store(
+        catalog,
+        columns,
+        st.session_state.get("gnet_unit", ""),
+    )
+    st.session_state["gnet_store_name"] = store["name"] if store else ""
+    st.session_state["gnet_store_state"] = store["state"] if store else ""
 
 
 def render_login():
@@ -617,6 +655,19 @@ def run_query(query, params=()):
         cursor = conn.cursor()
         cursor.execute(query, params)
         conn.commit()
+    finally:
+        conn.close()
+
+
+def run_many(query, parameter_rows):
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        conn.execute("BEGIN")
+        conn.executemany(query, parameter_rows)
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -1081,7 +1132,6 @@ with st.container(key="module-body-0"):
 with st.container(key="module-body-1"):
     st.subheader("Links de operadoras")
     tipos_link = ["MPLS", "Dedicado", "4G"]
-    tipo_link = st.selectbox("Tipo de link", tipos_link, key="tipo_link_conectividade")
     operadoras_por_link = {
         "MPLS": ["Vivo"],
         "Dedicado": [
@@ -1091,10 +1141,50 @@ with st.container(key="module-body-1"):
         ],
         "4G": ["Link 4G Próprio da DPSP", "Link 4G TBNet"],
     }
+    link_isolation = st.radio(
+        "A loja está isolada por link?",
+        ["Sim", "Não"],
+        index=1,
+        horizontal=True,
+        key="connectivity_link_isolation",
+    )
+    is_isolated = link_isolation == "Sim"
+    if is_isolated:
+        solicitacao_4g = st.radio(
+            "Solicitado envio de 4G?",
+            ["Sim", "Não"],
+            index=1,
+            horizontal=True,
+            key="solicitacao_envio_4g",
+        )
+        if solicitacao_4g == "Não":
+            st.warning("Favor abrir chamado para solicitação do 4G")
+            protocolo_4g = ""
+            status_chamado_4g = ""
+        else:
+            protocolo_4g = st.text_input(
+                "Número do Chamado para o 4G",
+                key="protocolo_chamado_4g",
+            )
+            status_chamado_4g = st.selectbox(
+                "Status do Chamado",
+                ["Pendente", "Em andamento", "Resolvido"],
+                key="status_chamado_4g",
+            )
+        observacao_4g = st.text_area(
+            "Observação",
+            key="observacao_chamado_4g",
+        )
+    else:
+        solicitacao_4g = ""
+        protocolo_4g = ""
+        status_chamado_4g = ""
+        observacao_4g = ""
+
     tipo_unidade = st.selectbox(
         "Tipo de unidade",
         [
-            "Loja Padrão",
+            "Loja",
             "Loja Polo",
             "Dark Store",
             "Centro de Distribuição (CD)",
@@ -1103,7 +1193,7 @@ with st.container(key="module-body-1"):
         ],
     )
     circuitos_por_topologia = {
-        "Loja Padrão": ["Link Primário", "Link Secundário", "Múltiplos Links / Inoperância Total"],
+        "Loja": ["Link Primário", "Link Secundário", "Múltiplos Links / Inoperância Total"],
         "Loja Polo": ["Link Primário", "Link Secundário", "Múltiplos Links / Inoperância Total"],
         "Dark Store": ["Link Primário", "Link Secundário", "Múltiplos Links / Inoperância Total"],
         "Centro de Distribuição (CD)": [
@@ -1126,93 +1216,262 @@ with st.container(key="module-body-1"):
         ],
     }
     st.caption(
-        "Topologia dupla: loja padrão, polo e dark store. "
-        "Topologia múltipla: CD, matriz e data center. "
-        "Os dados de nome e endereço poderão ser preenchidos automaticamente quando a lista oficial de lojas for fornecida."
+        "Topologia dupla: loja, polo e dark store. "
+        "Topologia múltipla: CD, matriz e data center."
     )
-    with st.form("form_conectividade"):
-        col1, col2 = st.columns(2)
-        with col1:
-            unidade = st.text_input("Unidade (Ex: VD044)")
-            nome_unidade = st.text_input("Nome da farmácia")
 
-        col_rua, col_bairro, col_estado = st.columns(3)
-        with col_rua:
-            rua = st.text_input("Rua / endereço")
-        with col_bairro:
-            bairro = st.text_input("Bairro")
-        with col_estado:
-            estado = st.text_input("Estado (UF)")
-
-        col_circuito, col_impacto = st.columns(2)
-        with col_circuito:
-            circuito_afetado = st.selectbox(
-                "Circuito afetado",
-                circuitos_por_topologia[tipo_unidade],
-            )
-        with col_impacto:
-            impacto = st.selectbox(
-                "Situação do link",
-                ["Link com degradação", "Link inoperante"],
-            )
-        col_operadora, col_protocolo, col_status = st.columns(3)
-        with col_operadora:
-            operadora = st.selectbox(
-                "Operadora",
-                operadoras_por_link[tipo_link],
-            )
-        with col_protocolo:
-            protocolo = st.text_input("Número do protocolo / chamado")
-        with col_status:
-            status = st.selectbox("Status", ["Pendente", "Em andamento", "Resolvido"])
-
-        observacoes_resolucao = st.text_area(
-            "Notas de resolução (obrigatórias quando status for Resolvido)",
-            placeholder="Descreva como a conexão foi normalizada e validada.",
+    catalog_path = find_store_catalog_path()
+    store_catalog = None
+    store_columns = None
+    if catalog_path is None:
+        st.info(
+            "A base de lojas ainda não está disponível. "
+            "Um administrador pode carregá-la em Gestão de Usuários."
         )
-        
-        submit_conn = st.form_submit_button("Registrar Incidente de Link")
-        if submit_conn:
-            if not unidade.strip():
-                st.error("Informe o código do local.")
-            elif status == "Resolvido" and not observacoes_resolucao.strip():
-                st.error("Informe as notas de resolução para concluir o incidente.")
-            else:
-                run_query(
-                    """INSERT INTO conectividade
-                       (unidade, nome_unidade, rua, bairro, estado, tipo_unidade, tipo_link,
-                        operadora, circuito_afetado, impacto, protocolo, status,
-                        observacoes_encerramento, turno, data_atualizacao, data_resolucao)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        unidade.strip(),
-                        nome_unidade.strip(),
-                        rua.strip(),
-                        bairro.strip(),
-                        estado.strip(),
-                        tipo_unidade,
-                        tipo_link,
-                        operadora,
-                        circuito_afetado,
-                        impacto,
-                        protocolo.strip(),
-                        status,
-                        observacoes_resolucao.strip(),
-                        turno_atual,
-                        now_utc_iso(),
-                        now_utc_iso() if status == "Resolvido" else None,
-                    ),
+    else:
+        try:
+            store_catalog, store_columns = load_store_catalog(
+                catalog_path.read_bytes()
+            )
+        except (OSError, ValueError) as error:
+            st.warning(f"Não foi possível carregar a base de lojas: {error}")
+
+    unidade = st.text_input(
+        "Unidade",
+        placeholder="VD043",
+        key="connectivity_unit",
+        on_change=(
+            autofill_connectivity_store
+            if store_catalog is not None
+            else None
+        ),
+        args=(store_catalog, store_columns),
+    )
+    if (
+        unidade.strip()
+        and store_catalog is not None
+        and find_store(store_catalog, store_columns, unidade) is None
+    ):
+        st.info("Unidade não encontrada na base. Preencha os dados da loja manualmente.")
+
+    col_name, col_email = st.columns(2)
+    with col_name:
+        nome_unidade = st.text_input(
+            "Nome da Loja",
+            key=CONNECTIVITY_AUTOFILL_KEYS["name"],
+        )
+    with col_email:
+        email_loja = st.text_input(
+            "E-mail da Loja",
+            key=CONNECTIVITY_AUTOFILL_KEYS["email"],
+        )
+
+    col_rua, col_bairro, col_estado = st.columns(3)
+    with col_rua:
+        rua = st.text_input(
+            "Rua / endereço",
+            key=CONNECTIVITY_AUTOFILL_KEYS["address"],
+        )
+    with col_bairro:
+        bairro = st.text_input(
+            "Bairro",
+            key=CONNECTIVITY_AUTOFILL_KEYS["district"],
+        )
+    with col_estado:
+        estado = st.text_input(
+            "Estado (UF)",
+            key=CONNECTIVITY_AUTOFILL_KEYS["state"],
+        )
+
+    st.markdown("### Dados dos links")
+    if is_isolated:
+        col_link_1, col_link_2 = st.columns(2)
+        with col_link_1:
+            tipo_link_1 = st.selectbox(
+                "Tipo de Link 1",
+                tipos_link,
+                key="tipo_link_conectividade_1",
+            )
+            operadora_1 = st.selectbox(
+                "Operadora do Link 1",
+                operadoras_por_link[tipo_link_1],
+                key=f"operadora_conectividade_1_{tipo_link_1}",
+            )
+            situacao_1 = st.selectbox(
+                "Situação do Link 1",
+                ["Link com degradação", "Link inoperante"],
+                key="situacao_conectividade_1",
+            )
+            protocolo_1 = st.text_input(
+                "Número do Protocolo/Chamado do Link 1",
+                key="protocolo_conectividade_1",
+            )
+            status_1 = st.selectbox(
+                "Status do Link 1",
+                STATUS_OPTIONS["conectividade"],
+                key="status_conectividade_1",
+            )
+        with col_link_2:
+            tipo_link_2 = st.selectbox(
+                "Tipo de Link 2",
+                tipos_link,
+                key="tipo_link_conectividade_2",
+            )
+            operadora_2 = st.selectbox(
+                "Operadora do Link 2",
+                operadoras_por_link[tipo_link_2],
+                key=f"operadora_conectividade_2_{tipo_link_2}",
+            )
+            situacao_2 = st.selectbox(
+                "Situação do Link 2",
+                ["Link com degradação", "Link inoperante"],
+                key="situacao_conectividade_2",
+            )
+            protocolo_2 = st.text_input(
+                "Número do Protocolo/Chamado do Link 2",
+                key="protocolo_conectividade_2",
+            )
+            status_2 = st.selectbox(
+                "Status do Link 2",
+                STATUS_OPTIONS["conectividade"],
+                key="status_conectividade_2",
+            )
+        link_records = [
+            (
+                tipo_link_1,
+                operadora_1,
+                "Link Primário",
+                situacao_1,
+                protocolo_1,
+                status_1,
+            ),
+            (
+                tipo_link_2,
+                operadora_2,
+                "Link Secundário",
+                situacao_2,
+                protocolo_2,
+                status_2,
+            ),
+        ]
+    else:
+        tipo_link_1 = st.selectbox(
+            "Tipo de Link",
+            tipos_link,
+            key="tipo_link_conectividade",
+        )
+        col_circuito, col_operadora = st.columns(2)
+        with col_circuito:
+            if tipo_link_1 == "MPLS":
+                circuito_1 = "Link Primário"
+                st.text_input(
+                    "Circuito afetado",
+                    value=circuito_1,
+                    disabled=True,
                 )
-                rerun_with_success("Incidente de conectividade registrado com sucesso!")
+            else:
+                circuito_1 = st.selectbox(
+                    "Circuito afetado",
+                    circuitos_por_topologia[tipo_unidade],
+                    key=f"circuito_conectividade_{tipo_link_1}",
+                )
+        with col_operadora:
+            operadora_1 = st.selectbox(
+                "Operadora",
+                operadoras_por_link[tipo_link_1],
+                key=f"operadora_conectividade_{tipo_link_1}",
+            )
+        situacao_1 = st.selectbox(
+            "Situação do Link 1",
+            ["Link com degradação", "Link inoperante"],
+        )
+        protocolo_1 = st.text_input(
+            "Número do Protocolo/Chamado do Link 1",
+            key="protocolo_conectividade_1",
+        )
+        status_1 = st.selectbox(
+            "Status do Link 1",
+            ["Pendente", "Em andamento", "Resolvido"],
+        )
+        link_records = [
+            (
+                tipo_link_1,
+                operadora_1,
+                circuito_1,
+                situacao_1,
+                protocolo_1,
+                status_1,
+            )
+        ]
+
+    submit_conn = st.button("Registrar Incidente de Link")
+    if submit_conn:
+        if not unidade.strip():
+            st.error("Informe o código do local.")
+        else:
+            inserted_at = now_utc_iso()
+            insert_sql = """INSERT INTO conectividade
+                   (unidade, nome_unidade, rua, bairro, estado, email_loja,
+                   tipo_unidade, tipo_link, operadora, circuito_afetado, impacto,
+                   protocolo, status, solicitacao_4g, protocolo_4g,
+                   status_chamado_4g, observacao_4g, observacoes_encerramento,
+                   turno, data_atualizacao, data_resolucao)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+            parameter_rows = [
+                (
+                    unidade.strip(),
+                    nome_unidade.strip(),
+                    rua.strip(),
+                    bairro.strip(),
+                    estado.strip(),
+                    email_loja.strip(),
+                    tipo_unidade,
+                    tipo_link,
+                    operadora,
+                    circuito_afetado,
+                    situacao,
+                    protocolo.strip(),
+                    status,
+                    solicitacao_4g,
+                    protocolo_4g.strip(),
+                    status_chamado_4g,
+                    observacao_4g.strip(),
+                    observacao_4g.strip(),
+                    turno_atual,
+                    inserted_at,
+                    now_utc_iso() if status == "Resolvido" else None,
+                )
+                for (
+                    tipo_link,
+                    operadora,
+                    circuito_afetado,
+                    situacao,
+                    protocolo,
+                    status,
+                ) in link_records
+            ]
+            try:
+                run_many(insert_sql, parameter_rows)
+            except sqlite3.Error as error:
+                st.error(f"Não foi possível registrar o incidente: {error}")
+            else:
+                rerun_with_success(
+                    "Incidentes dos dois links registrados com sucesso!"
+                    if is_isolated
+                    else "Incidente de conectividade registrado com sucesso!"
+                )
 
     st.markdown("### Histórico de ocorrências de links")
     df_conn = load_data(
-        """SELECT id, unidade, nome_unidade, rua, bairro, estado, tipo_unidade, tipo_link, operadora,
-                  circuito_afetado, impacto, protocolo, status,
+        """SELECT id, unidade, nome_unidade, rua, bairro, estado, email_loja,
+                  tipo_unidade, tipo_link, operadora, circuito_afetado, impacto,
+                  protocolo, status, solicitacao_4g, protocolo_4g,
+                  status_chamado_4g, observacao_4g,
                   observacoes_encerramento, turno, data_registro,
                   data_atualizacao, data_resolucao
            FROM conectividade ORDER BY id DESC"""
     )
+    df_conn = df_conn.rename(columns={"email_loja": "E-mail da Loja"})
     render_status_manager(
         "conectividade",
         df_conn,
@@ -1227,28 +1486,77 @@ with st.container(key="module-body-2"):
         ["Fortinet com degradação", "Fortinet danificado"],
         key="motivo_gnet",
     )
+    gnet_catalog = None
+    gnet_catalog_columns = None
+    gnet_catalog_path = find_store_catalog_path()
+    if gnet_catalog_path is None:
+        st.info(
+            "A base de lojas ainda não está disponível. "
+            "Um administrador pode carregá-la em Gestão de Usuários."
+        )
+    else:
+        try:
+            gnet_catalog, gnet_catalog_columns = load_store_catalog(
+                gnet_catalog_path.read_bytes()
+            )
+        except (OSError, ValueError) as error:
+            st.warning(f"Não foi possível carregar a base de lojas: {error}")
+    unidade_gnet = st.text_input(
+        "Unidade",
+        placeholder="VD043",
+        key="gnet_unit",
+        on_change=autofill_gnet_store if gnet_catalog is not None else None,
+        args=(gnet_catalog, gnet_catalog_columns),
+    )
+    if (
+        unidade_gnet.strip()
+        and gnet_catalog is not None
+        and find_store(gnet_catalog, gnet_catalog_columns, unidade_gnet) is None
+    ):
+        st.info("Unidade não encontrada na base. Preencha os dados manualmente.")
+
     with st.form("form_gnet"):
         col1, col2 = st.columns(2)
         with col1:
-            unidade = st.text_input("Unidade")
+            nome_unidade_gnet = st.text_input(
+                "Nome da Loja",
+                key="gnet_store_name",
+            )
+            estado_gnet = st.text_input(
+                "Estado",
+                key="gnet_store_state",
+            )
             if motivo_gnet == "Fortinet danificado":
                 observacao_dano = st.text_area(
                     "Descreva o dano identificado no Fortinet",
                     placeholder="Ex.: fonte danificada, queimado após contato com água.",
+                    key="gnet_damage_observation",
                 )
             else:
                 observacao_dano = ""
-            modelo_fortinet = st.text_input("Modelo do Fortinet (Ex: FortiGate 30E / 60D)")
+            modelo_fortinet = st.text_input(
+                "Modelo do Fortinet (Ex: FortiGate 30E / 60D)",
+                key="gnet_model",
+            )
         with col2:
-            ip_balcao = st.text_input("IP do Balcão")
-            porta_switch = st.text_input("Número da Porta do Switch")
-            chamado_gnet = st.text_input("Número do chamado de redes")
-            status = "Aguardando solução do time de redes"
-            st.text_input("Status", value=status, disabled=True)
+            ip_balcao = st.text_input("IP do Balcão", key="gnet_ip")
+            porta_switch = st.text_input(
+                "Número da Porta do Switch",
+                key="gnet_switch_port",
+            )
+            chamado_gnet = st.text_input(
+                "Número do Chamado",
+                key="gnet_ticket_number",
+            )
+            status = st.selectbox(
+                "Status",
+                STATUS_OPTIONS["lojas_gnet"],
+                key="status_gnet",
+            )
         
         submit_gnet = st.form_submit_button("Salvar GNET")
         if submit_gnet:
-            if not unidade.strip():
+            if not unidade_gnet.strip():
                 st.error("Informe a unidade.")
             elif not chamado_gnet.strip():
                 st.error("Informe o número do chamado aberto para o time de redes.")
@@ -1257,11 +1565,13 @@ with st.container(key="module-body-2"):
             else:
                 run_query(
                     """INSERT INTO lojas_gnet
-                       (unidade, motivo, modelo_fortinet, ip_balcao, porta_switch, chamado_redes,
-                        observacao_dano, status, turno, data_atualizacao)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (unidade, nome_unidade, estado, motivo, modelo_fortinet,
+                        ip_balcao, porta_switch, chamado_redes, observacao_dano,
+                        status, turno, data_atualizacao)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
-                        unidade.strip(), motivo_gnet, modelo_fortinet.strip(),
+                        unidade_gnet.strip(), nome_unidade_gnet.strip(),
+                        estado_gnet.strip(), motivo_gnet, modelo_fortinet.strip(),
                         ip_balcao.strip(), porta_switch.strip(), chamado_gnet.strip(),
                         observacao_dano.strip(), status, turno_atual,
                         now_utc_iso(),
@@ -1271,7 +1581,8 @@ with st.container(key="module-body-2"):
 
     st.markdown("### Histórico de registros GNET")
     df_gnet = load_data(
-        """SELECT id, unidade, motivo, observacao_dano, modelo_fortinet, ip_balcao,
+        """SELECT id, unidade, nome_unidade, estado, motivo, observacao_dano,
+                  modelo_fortinet, ip_balcao,
                   porta_switch, chamado_redes, status, turno, data_registro,
                   data_atualizacao, data_resolucao
            FROM lojas_gnet ORDER BY id DESC"""
@@ -2158,6 +2469,29 @@ if is_admin:
             "e deverão alterá-la no primeiro acesso. Entregue a senha por um canal "
             "seguro; a aplicação não envia e-mails."
         )
+
+        st.markdown("### Base de lojas")
+        st.caption(
+            "Atualize a planilha usada para preencher os dados da loja no módulo "
+            "Conectividade. Os cabeçalhos obrigatórios devem estar na primeira linha."
+        )
+        store_catalog_upload = st.file_uploader(
+            "Planilha base de lojas (.xlsx)",
+            type=["xlsx"],
+            key="store_catalog_upload",
+        )
+        if st.button("Atualizar base de lojas", key="update_store_catalog"):
+            if store_catalog_upload is None:
+                st.error("Selecione uma planilha .xlsx para atualizar a base.")
+            else:
+                try:
+                    save_store_catalog(store_catalog_upload.getvalue())
+                except (OSError, ValueError) as error:
+                    st.error(f"Não foi possível atualizar a base de lojas: {error}")
+                else:
+                    load_store_catalog.clear()
+                    st.success("Base de lojas atualizada.")
+                    st.rerun()
 
         with st.form("create_user_form"):
             col_name, col_email = st.columns(2)
