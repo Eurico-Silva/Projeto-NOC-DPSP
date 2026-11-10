@@ -1,25 +1,16 @@
 import os
 import streamlit as st
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import URL
+from sqlalchemy import text
 from pathlib import Path
 
 # Mantido para compatibilidade com outros arquivos do sistema que importam essa variável
 DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
 
-# Criando a URL de conexão estruturada separando os parâmetros de forma nativa e isolada
-db_url_object = URL.create(
-    drivername="postgresql+psycopg2",
-    username="postgres.kugjdeaurrthelsksncq",
-    password="Passagemdeturno",
-    host="://supabase.com",
-    port=6543,
-    database="postgres",
-    query={"sslmode": "require"}
-)
+# Inicializa o conector nativo estável do Streamlit gerenciador de rede
+conn_streamlit = st.connection("postgresql", type="sql")
 
-# Cria o motor de conexão do SQLAlchemy usando o objeto estruturado imutável
-engine = create_engine(db_url_object, pool_pre_ping=True)
+# Obtém o motor SQLAlchemy de forma retrocompatível para rodar os métodos .begin() normais do app
+engine = conn_streamlit.connect().engine
 
 class PostgresCursorAdapter:
     """Classe adaptadora para imitar o comportamento do cursor do SQLite no PostgreSQL"""
