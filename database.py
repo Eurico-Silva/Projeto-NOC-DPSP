@@ -10,8 +10,8 @@ DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
 if st.secrets.get("DB_URL"):
     DB_URL = st.secrets["DB_URL"]
 else:
-    # URL estável utilizando a porta direta tradicional do PostgreSQL
-    DB_URL = "postgresql+psycopg2://postgres:Passagemdeturno@db.kugjdeaurrthelsksncq.supabase.co:5432/postgres"
+    # URL oficial usando o Pooler estável com SSL obrigatório
+    DB_URL = "postgresql+psycopg2://postgres.kugjdeaurrthelsksncq:Passagemdeturno@://supabase.com"
 
 # Cria o motor de conexão do SQLAlchemy
 engine = create_engine(DB_URL, pool_pre_ping=True)
