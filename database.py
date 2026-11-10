@@ -6,11 +6,9 @@ from pathlib import Path
 # Mantido para compatibilidade com outros arquivos do sistema que importam essa variável
 DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
 
-# Inicializa o conector nativo estável do Streamlit gerenciador de rede
+# Inicializa o conector nativo estável do Streamlit
 conn_streamlit = st.connection("postgresql", type="sql")
-
-# Obtém o motor SQLAlchemy de forma retrocompatível para rodar os métodos .begin() normais do app
-engine = conn_streamlit.connect().engine
+engine = conn_streamlit._engine
 
 class PostgresCursorAdapter:
     """Classe adaptadora para imitar o comportamento do cursor do SQLite no PostgreSQL"""
