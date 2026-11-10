@@ -1,21 +1,25 @@
 import os
 import streamlit as st
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from pathlib import Path
 
 # Mantido para compatibilidade com outros arquivos do sistema que importam essa variável
 DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
 
-# Busca a URL segura das Secrets do Streamlit
-if st.secrets.get("DB_URL"):
-    DB_URL = st.secrets["DB_URL"]
-else:
-    # URL local utilizando o ponto codificado como %2E para evitar falhas de leitura do Python
-    DB_URL = "postgresql+psycopg2://postgres%2Ekugjdeaurrthelsksncq:Passagemdeturno@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require"
+# Criando a URL de conexão estruturada separando os parâmetros de forma nativa e isolada
+db_url_object = URL.create(
+    drivername="postgresql+psycopg2",
+    username="postgres.kugjdeaurrthelsksncq",
+    password="Passagemdeturno",
+    host="://supabase.com",
+    port=6543,
+    database="postgres",
+    query={"sslmode": "require"}
+)
 
-# Cria o motor de conexão clássico e estável do SQLAlchemy
-engine = create_engine(DB_URL, pool_pre_ping=True)
-
+# Cria o motor de conexão do SQLAlchemy usando o objeto estruturado imutável
+engine = create_engine(db_url_object, pool_pre_ping=True)
 
 class PostgresCursorAdapter:
     """Classe adaptadora para imitar o comportamento do cursor do SQLite no PostgreSQL"""
