@@ -1,14 +1,17 @@
 import os
 import streamlit as st
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from pathlib import Path
 
-# Mantido para compatibilidade com outros arquivos do sistema que importam essa variável
-DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
+# Lê a URL com Keepalives configurada nas Secrets do Streamlit Cloud
+if st.secrets.get("DB_URL"):
+    DB_URL = st.secrets["DB_URL"]
+else:
+    # Fallback estável para rodar localmente se precisar
+    DB_URL = "postgresql+psycopg2://postgres.kugjdeaurrthelsksncq:Passagemdeturno@://supabase.com"
 
-# Inicializa o conector nativo estável do Streamlit
-conn_streamlit = st.connection("postgresql", type="sql")
-engine = conn_streamlit.engine
+# Instancia o motor limpando conexões fantasmas e testando a rede antes de executar queries
+engine = create_engine(DB_URL, pool_size=5, max_overflow=10, pool_pre_ping=True, pool_recycle=1800)
 
 class PostgresCursorAdapter:
     """Classe adaptadora para imitar o comportamento do cursor do SQLite no PostgreSQL"""
