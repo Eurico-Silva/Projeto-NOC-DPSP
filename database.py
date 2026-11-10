@@ -1,14 +1,21 @@
 import os
 import streamlit as st
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from pathlib import Path
 
 # Mantido para compatibilidade com outros arquivos do sistema que importam essa variável
 DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
 
-# Utiliza a conexão nativa e gerenciada do próprio Streamlit
-conn_streamlit = st.connection("postgresql", type="sql")
-engine = conn_streamlit._engine
+# Busca a URL segura das Secrets do Streamlit
+if st.secrets.get("DB_URL"):
+    DB_URL = st.secrets["DB_URL"]
+else:
+    # URL local utilizando o ponto codificado como %2E para evitar falhas de leitura do Python
+    DB_URL = "postgresql+psycopg2://postgres%2Ekugjdeaurrthelsksncq:Passagemdeturno@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require"
+
+# Cria o motor de conexão clássico e estável do SQLAlchemy
+engine = create_engine(DB_URL, pool_pre_ping=True)
+
 
 class PostgresCursorAdapter:
     """Classe adaptadora para imitar o comportamento do cursor do SQLite no PostgreSQL"""
@@ -44,7 +51,7 @@ def add_missing_columns(cursor, table, columns):
         FROM information_schema.columns 
         WHERE table_name = '{table.lower()}'
     """
-    existing = {row.lower() for row in cursor.execute(query).fetchall()}
+    existing = {row.lower() for row in cursor.execute(query).fetchall() if row}
     
     for column, definition in columns.items():
         if column.lower() not in existing:
