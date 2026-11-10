@@ -8,7 +8,7 @@ DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
 
 # Inicializa o conector nativo estável do Streamlit
 conn_streamlit = st.connection("postgresql", type="sql")
-engine = conn_streamlit.driver
+engine = conn_streamlit.engine
 
 class PostgresCursorAdapter:
     """Classe adaptadora para imitar o comportamento do cursor do SQLite no PostgreSQL"""
