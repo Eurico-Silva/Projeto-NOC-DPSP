@@ -11,7 +11,7 @@ if st.secrets.get("DB_URL"):
     DB_URL = st.secrets["DB_URL"]
 else:
     # URL para rodar o projeto localmente no seu PC conectado ao Supabase
-    DB_URL = "postgresql://postgres:Passagemdeturno@db.kugjdeaurrthelsksncq.supabase.com:5432/postgres"
+    DB_URL = "postgresql+psycopg2://postgres:Passagemdeturno@://supabase.com"
 
 # Cria o motor de conexão do SQLAlchemy
 engine = create_engine(DB_URL, pool_pre_ping=True)
