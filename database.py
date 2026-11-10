@@ -7,13 +7,13 @@ from pathlib import Path
 # Mantido para compatibilidade com outros arquivos do sistema que importam essa variável
 DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
 
-# Criando a URL de conexão de forma estruturada usando o seu endereço completo
+# Criando a URL de conexão estruturada apontando para o Pooler IPv4 estável
 db_url_object = URL.create(
     drivername="postgresql+psycopg2",
-    username="postgres",
+    username="postgres.kugjdeaurrthelsksncq",
     password="Passagemdeturno",
-    host="db.kugjdeaurrthelsksncq.supabase.co",
-    port=5432,
+    host="://supabase.com",
+    port=6543,
     database="postgres",
     query={"sslmode": "require"}
 )
