@@ -3,12 +3,15 @@ import streamlit as st
 from sqlalchemy import create_engine, text
 from pathlib import Path
 
+# Mantido para compatibilidade com outros arquivos do sistema que importam essa variável
+DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
+
 # Configuração da Conexão (Nuvem ou Local)
 if st.secrets.get("DB_URL"):
     DB_URL = st.secrets["DB_URL"]
 else:
     # URL para rodar o projeto localmente no seu PC conectado ao Supabase
-    DB_URL = "postgresql://postgres:Passagemdeturno@://supabase.com"
+    DB_URL = "postgresql://postgres:Passagemdeturno@db.kugjdeaurrthelsksncq.supabase.com:5432/postgres"
 
 # Cria o motor de conexão do SQLAlchemy
 engine = create_engine(DB_URL, pool_pre_ping=True)
@@ -48,7 +51,7 @@ def add_missing_columns(cursor, table, columns):
         FROM information_schema.columns 
         WHERE table_name = '{table.lower()}'
     """
-    existing = {row[0].lower() for row in cursor.execute(query).fetchall()}
+    existing = {row.lower() for row in cursor.execute(query).fetchall()}
     
     for column, definition in columns.items():
         if column.lower() not in existing:
@@ -290,20 +293,22 @@ def init_db():
                 locked_until TEXT
             )
         """)
+
         # Bloco de Migrations dinâmicas adaptadas e devidamente fechado
         migrations = {
-"conectividade": {
-"nome_unidade": "TEXT",
-"rua": "TEXT",
-"bairro": "TEXT",
-"estado": "TEXT",
-"email_loja": "TEXT",
-"tipo_unidade": "TEXT",
-"circuito_afetado": "TEXT",
-"solicitacao_4g": "TEXT",
-"protocolo_4g": "TEXT",
-"status_chamado_4g": "TEXT"
-}
-}
-for table, columns in migrations.items():
-add_missing_columns(cursor, table, columns)
+            "conectividade": {
+                "nome_unidade": "TEXT",
+                "rua": "TEXT",
+                "bairro": "TEXT",
+                "estado": "TEXT",
+                "email_loja": "TEXT",
+                "tipo_unidade": "TEXT",
+                "circuito_afetado": "TEXT",
+                "solicitacao_4g": "TEXT",
+                "protocolo_4g": "TEXT",
+                "status_chamado_4g": "TEXT"
+            }
+        }
+
+        for table, columns in migrations.items():
+            add_missing_columns(cursor, table, columns)
