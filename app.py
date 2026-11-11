@@ -1,5 +1,4 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 from datetime import datetime, timezone
 from html import escape
@@ -16,7 +15,13 @@ from authorization import (
     update_user_access,
     user_count,
 )
-from database import DB_NAME, init_db
+from database import (
+    SQLAlchemyError,
+    connect,
+    engine,
+    init_db,
+    prepare_query,
+)
 from store_catalog import (
     find_store,
     find_store_catalog_path,
@@ -436,7 +441,7 @@ def save_status_changes(table, previous, edited):
         return 0
 
     updated_at = now_utc_iso()
-    connection = sqlite3.connect(DB_NAME)
+    connection = connect()
     try:
         connection.execute("BEGIN IMMEDIATE")
         cursor = connection.cursor()
@@ -510,7 +515,7 @@ def save_status_changes(table, previous, edited):
 def close_record(table, record_id, notes):
     status = CLOSE_STATUSES[table]
     changed_at = now_utc_iso()
-    connection = sqlite3.connect(DB_NAME)
+    connection = connect()
     try:
         connection.execute("BEGIN IMMEDIATE")
         cursor = connection.cursor()
@@ -650,7 +655,7 @@ def render_status_manager(table, records, alt):
 
 
 def run_query(query, params=()):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect()
     try:
         cursor = conn.cursor()
         cursor.execute(query, params)
@@ -660,12 +665,12 @@ def run_query(query, params=()):
 
 
 def run_many(query, parameter_rows):
-    conn = sqlite3.connect(DB_NAME)
+    conn = connect()
     try:
         conn.execute("BEGIN")
         conn.executemany(query, parameter_rows)
         conn.commit()
-    except sqlite3.Error:
+    except SQLAlchemyError:
         conn.rollback()
         raise
     finally:
@@ -681,11 +686,8 @@ def rerun_with_success(message):
 
 
 def load_data(query, params=()):
-    conn = sqlite3.connect(DB_NAME)
-    try:
-        return pd.read_sql(query, conn, params=params)
-    finally:
-        conn.close()
+    statement, bound_params = prepare_query(query, params)
+    return pd.read_sql(statement, engine, params=bound_params)
 
 PENDENCIAS_ABERTAS_QUERY = """
     SELECT 'Conectividade' AS categoria, id,
@@ -1452,7 +1454,7 @@ with st.container(key="module-body-1"):
             ]
             try:
                 run_many(insert_sql, parameter_rows)
-            except sqlite3.Error as error:
+            except SQLAlchemyError as error:
                 st.error(f"Não foi possível registrar o incidente: {error}")
             else:
                 rerun_with_success(

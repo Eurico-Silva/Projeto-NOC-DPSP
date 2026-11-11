@@ -2,12 +2,12 @@ import hashlib
 import hmac
 import os
 import re
-import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from sqlalchemy.exc import IntegrityError
 
-from database import DB_NAME
+from database import connect
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PASSWORD_MIN_LENGTH = 12
@@ -91,9 +91,7 @@ def verify_password(password, stored_hash):
 
 
 def _connect():
-    connection = sqlite3.connect(DB_NAME, timeout=10)
-    connection.row_factory = sqlite3.Row
-    return connection
+    return connect()
 
 
 def _user_from_row(row):
@@ -152,11 +150,12 @@ def create_initial_admin(email, full_name, password):
             """INSERT INTO users
                (email, password_hash, full_name, role, is_active,
                 must_change_password, created_at)
-               VALUES (?, ?, ?, 'admin', 1, 0, ?)""",
+               VALUES (?, ?, ?, 'admin', 1, 0, ?) RETURNING id""",
             (normalized_email, password_hash, validated_name, now_brasilia_iso()),
         )
+        user_id = cursor.fetchone()[0]
         connection.commit()
-        return cursor.lastrowid
+        return user_id
 
 
 def authenticate_user(email, password):
@@ -269,7 +268,7 @@ def create_user(email, full_name, password, role, actor_id):
                 """INSERT INTO users
                    (email, password_hash, full_name, role, is_active,
                     must_change_password, created_at)
-                   VALUES (?, ?, ?, ?, 1, 1, ?)""",
+                         VALUES (?, ?, ?, ?, 1, 1, ?) RETURNING id""",
                 (
                     normalized_email,
                     password_hash,
@@ -278,11 +277,12 @@ def create_user(email, full_name, password, role, actor_id):
                     now_brasilia_iso(),
                 ),
             )
-        except sqlite3.IntegrityError as error:
+        except IntegrityError as error:
             connection.rollback()
             raise ValueError("Esse e-mail já possui uma conta.") from error
+        user_id = cursor.fetchone()[0]
         connection.commit()
-        return cursor.lastrowid
+        return user_id
 
 
 def update_user_access(user_id, role, is_active, actor_id):

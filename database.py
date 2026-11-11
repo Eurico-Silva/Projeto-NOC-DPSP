@@ -1,58 +1,263 @@
 import os
+import re
+import sqlite3
 import streamlit as st
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import URL
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import SQLAlchemyError
 from pathlib import Path
 
 # Váriavel obrigatória exigida pelo modulo authorization.py
 DB_NAME = str(Path(__file__).resolve().with_name("central_comando.db"))
 
-# Configuração da URL utilizando a porta dedicada do Session Pooler do Supabase
-db_url_object = URL.create(
-    drivername="postgresql+psycopg",
-    username="postgres.kugjdeaurrthelsksncq",
-    password="Passagemdeturno",
-    host="://supabase.com",
-    port=6543,
-    database="postgres",
-    query={
-        "sslmode": "require",
-        "keepalives": "1",
-        "keepalives_idle": "30",
-        "keepalives_interval": "10",
-        "keepalives_count": "5"
-    }
+def _load_database_url():
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        try:
+            database_url = st.secrets["DATABASE_URL"]
+        except Exception as error:
+            raise RuntimeError(
+                "Configure DATABASE_URL nas variáveis de ambiente ou em "
+                ".streamlit/secrets.toml."
+            ) from error
+
+    url = make_url(database_url)
+    if url.drivername in {"postgres", "postgresql"}:
+        url = url.set(drivername="postgresql+psycopg")
+    if url.drivername != "postgresql+psycopg":
+        raise RuntimeError("DATABASE_URL deve apontar para um PostgreSQL.")
+
+    query = dict(url.query)
+    query.setdefault("sslmode", "require")
+    return url.set(query=query)
+
+
+engine = create_engine(
+    _load_database_url(),
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    connect_args={"prepare_threshold": None},
 )
 
-# Instancia o motor do SQLAlchemy de forma explícita e estável
-engine = create_engine(db_url_object, pool_size=5, max_overflow=10, pool_pre_ping=True, pool_recycle=1800)
 
-class PostgresCursorAdapter:
-    """Classe adaptadora para imitar o comportamento do cursor do SQLite no PostgreSQL"""
-    def __init__(self, connection):
-        self.connection = connection
+def _prepare_query(query, params=()):
+    if isinstance(params, dict):
+        return text(query), params
 
-    def execute(self, query, params=None):
-        # Substitui placeholders antigos '?' por '%s' caso existam no resto do código
-        cleaned_query = query.replace('?', '%s')
-        
-        # Executa a query
-        if params:
-            result = self.connection.execute(text(cleaned_query), params)
-        else:
-            result = self.connection.execute(text(cleaned_query))
-        
+    values = tuple(params or ())
+    index = 0
+
+    def replace_placeholder(_match):
+        nonlocal index
+        name = f"param_{index}"
+        index += 1
+        return f":{name}"
+
+    statement = re.sub(r"\?", replace_placeholder, query)
+    return text(statement), {
+        f"param_{position}": value for position, value in enumerate(values)
+    }
+
+
+class DatabaseRow(tuple):
+    def __new__(cls, values, keys):
+        row = super().__new__(cls, values)
+        row._keys = tuple(keys)
+        return row
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            key = self._keys.index(key)
+        return super().__getitem__(key)
+
+
+class ResultAdapter:
+    def __init__(self, result):
         self.result = result
-        return self
-
-    def fetchall(self):
-        # Converte as linhas para tuplas para manter compatibilidade com SQLite
-        return [tuple(row) for row in self.result.fetchall()]
+        self.keys = tuple(result.keys())
 
     def fetchone(self):
         row = self.result.fetchone()
-        return tuple(row) if row else None
+        return DatabaseRow(row, self.keys) if row is not None else None
 
+    def fetchall(self):
+        return [DatabaseRow(row, self.keys) for row in self.result.fetchall()]
+
+    @property
+    def rowcount(self):
+        return self.result.rowcount
+
+
+class PostgresCursorAdapter:
+    """Adapta placeholders e linhas do PostgreSQL para as chamadas existentes."""
+
+    def __init__(self, connection):
+        self.connection = connection
+        self.result = None
+
+    def execute(self, query, params=()):
+        statement, values = _prepare_query(query, params)
+        self.result = ResultAdapter(self.connection.execute(statement, values))
+        return self
+
+    def executemany(self, query, parameter_rows):
+        rows = list(parameter_rows)
+        if not rows:
+            return self
+        statement, _ = _prepare_query(query, rows[0])
+        names = [f"param_{index}" for index in range(len(rows[0]))]
+        values = [dict(zip(names, row)) for row in rows]
+        self.result = ResultAdapter(self.connection.execute(statement, values))
+        return self
+
+    def fetchone(self):
+        return self.result.fetchone()
+
+    def fetchall(self):
+        return self.result.fetchall()
+
+
+class PostgresConnectionAdapter:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, query, params=()):
+        if query.strip().upper() in {"BEGIN", "BEGIN IMMEDIATE"}:
+            if not self.connection.in_transaction():
+                self.connection.begin()
+            return None
+        return PostgresCursorAdapter(self.connection).execute(query, params).result
+
+    def cursor(self):
+        return PostgresCursorAdapter(self.connection)
+
+    def executemany(self, query, parameter_rows):
+        return PostgresCursorAdapter(self.connection).executemany(
+            query, parameter_rows
+        )
+
+    def commit(self):
+        self.connection.commit()
+
+    def rollback(self):
+        self.connection.rollback()
+
+    def close(self):
+        self.connection.close()
+
+
+def connect():
+    return PostgresConnectionAdapter(engine.connect())
+
+
+def prepare_query(query, params=()):
+    return _prepare_query(query, params)
+
+
+def migrate_local_database():
+    """Importa uma vez os dados do SQLite local sem removê-los da origem."""
+    if not Path(DB_NAME).is_file():
+        raise FileNotFoundError(f"Banco SQLite local não encontrado: {DB_NAME}")
+
+    with sqlite3.connect(f"file:{DB_NAME}?mode=ro", uri=True) as source:
+        source.row_factory = sqlite3.Row
+        source_tables = [
+            row[0]
+            for row in source.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name NOT LIKE 'sqlite_%'"
+            )
+        ]
+
+        with engine.begin() as destination:
+            destination.execute(text(
+                """CREATE TABLE IF NOT EXISTS migration_history (
+                       migration_key TEXT PRIMARY KEY,
+                       imported_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                   )"""
+            ))
+            completed = destination.execute(
+                text("SELECT 1 FROM migration_history WHERE migration_key = :key"),
+                {"key": "central_comando_sqlite_v1"},
+            ).first()
+            if completed:
+                return {"already_migrated": True}
+
+            destination_tables = {
+                row[0]
+                for row in destination.execute(text(
+                    """SELECT table_name FROM information_schema.tables
+                       WHERE table_schema = current_schema()
+                         AND table_type = 'BASE TABLE'"""
+                ))
+            }
+            imported = {}
+
+            for table in source_tables:
+                if table not in destination_tables:
+                    continue
+
+                source_columns = {
+                    row[1]
+                    for row in source.execute(f'PRAGMA table_info("{table}")')
+                }
+                destination_columns = {
+                    row[0]
+                    for row in destination.execute(
+                        text("""SELECT column_name FROM information_schema.columns
+                               WHERE table_schema = current_schema()
+                                 AND table_name = :table"""),
+                        {"table": table},
+                    )
+                }
+                columns = sorted(source_columns & destination_columns)
+                if not columns:
+                    continue
+
+                quote = lambda name: '"' + name.replace('"', '""') + '"'
+                rows = source.execute(
+                    f"SELECT {', '.join(quote(column) for column in columns)} "
+                    f"FROM {quote(table)}"
+                ).fetchall()
+                if not rows:
+                    continue
+
+                placeholders = [f":value_{index}" for index in range(len(columns))]
+                insert = text(
+                    f"INSERT INTO {quote(table)} "
+                    f"({', '.join(quote(column) for column in columns)}) "
+                    f"VALUES ({', '.join(placeholders)}) ON CONFLICT DO NOTHING"
+                )
+                values = [
+                    {
+                        f"value_{index}": row[column]
+                        for index, column in enumerate(columns)
+                    }
+                    for row in rows
+                ]
+                result = destination.execute(insert, values)
+                imported[table] = result.rowcount
+
+                if "id" in columns:
+                    sequence = destination.execute(
+                        text("SELECT pg_get_serial_sequence(:table_name, 'id')"),
+                        {"table_name": table},
+                    ).scalar_one_or_none()
+                    if sequence:
+                        destination.execute(
+                            text(
+                                f"SELECT setval(CAST(:sequence AS regclass), "
+                                f"COALESCE((SELECT MAX(id) FROM {quote(table)}), 1), "
+                                f"EXISTS (SELECT 1 FROM {quote(table)}))"
+                            ),
+                            {"sequence": sequence},
+                        )
+
+            destination.execute(
+                text("INSERT INTO migration_history (migration_key) VALUES (:key)"),
+                {"key": "central_comando_sqlite_v1"},
+            )
+            return {"already_migrated": False, "imported": imported}
 
 def add_missing_columns(cursor, table, columns):
     # Consulta as colunas existentes usando a tabela padrão do Postgres
@@ -61,7 +266,11 @@ def add_missing_columns(cursor, table, columns):
         FROM information_schema.columns 
         WHERE table_name = '{table.lower()}'
     """
-    existing = {row.lower() for row in cursor.execute(query).fetchall() if row}
+    existing = {
+        row[0].lower()
+        for row in cursor.execute(query).fetchall()
+        if row and row[0]
+    }
     
     for column, definition in columns.items():
         if column.lower() not in existing:
