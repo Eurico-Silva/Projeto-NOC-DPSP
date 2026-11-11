@@ -3,17 +3,26 @@ Aplicação Streamlit para passagem de turno da Central de Comando
 
 ## Banco de dados
 
-A aplicação usa PostgreSQL. No Supabase, crie um projeto e copie a URL de
-conexão do pooler (Transaction ou Session), com SSL habilitado. Configure a
-mesma variável `DATABASE_URL` localmente em `.streamlit/secrets.toml`:
+A aplicação usa PostgreSQL. No Supabase, abra **Connect**, selecione um pooler
+(Session ou Transaction) e copie a URI PostgreSQL completa, incluindo o host e
+a porta informados pelo Supabase. Não troque a porta manualmente: Session e
+Transaction podem usar portas diferentes. Configure a URI localmente em
+`.streamlit/secrets.toml`:
 
 ```toml
-DATABASE_URL = "postgresql://postgres.<PROJECT_REF>:<DB_PASSWORD>@<POOLER_HOST>:6543/postgres?sslmode=require"
+DATABASE_URL = "postgresql://postgres.<PROJECT_REF>:<DB_PASSWORD>@<POOLER_HOST>:<PORT>/postgres?sslmode=require"
 ```
 
 No Streamlit Community Cloud, adicione esse conteúdo em **App settings >
 Secrets**. Não envie `secrets.toml` ao Git. A aplicação cria as tabelas ao
 iniciar.
+
+Se a conexão falhar no Streamlit Cloud, confira em **Manage app > Logs** a
+mensagem original do Psycopg. Erros de resolução de nome indicam host incorreto;
+falha de autenticação indica senha/usuário incorretos. Se a senha tiver
+caracteres especiais, use a URI copiada pelo Supabase ou faça o URL-encode da
+senha. Para projetos com conexão direta IPv6, use o pooler, que é adequado ao
+ambiente do Streamlit Cloud.
 
 Para levar ao Supabase os dados do arquivo local `central_comando.db`, instale
 as dependências e execute a migração na raiz do projeto, com `DATABASE_URL`
