@@ -83,6 +83,11 @@ O adaptador também precisou distinguir consultas que retornam linhas de
 comandos como `CREATE TABLE`, que não retornam. A correção evita que a
 inicialização tente acessar colunas inexistentes em resultados DDL.
 
+A inicialização também usa um lock transacional do PostgreSQL. Ele serializa a
+criação do schema quando mais de uma sessão do Streamlit inicia ao mesmo tempo,
+evitando que duas tentem criar simultaneamente a mesma sequência de uma coluna
+`SERIAL`.
+
 ### Tabelas e alterações de estrutura
 
 Ao iniciar, `init_db()` cria as tabelas usadas pelo sistema no PostgreSQL e
@@ -125,6 +130,12 @@ Supabase.
   mas o adaptador tentava ler linhas de um comando que não retorna linhas. O
   tratamento foi ajustado para só acessar resultados de consultas que retornam
   linhas.
+- **Coluna `data_resolucao` ausente em `problemas_glpi`:** `CREATE TABLE IF NOT
+  EXISTS` não altera uma tabela que já existe. A coluna foi incluída na lista de
+  migrações para ser adicionada a instalações existentes sem remover os dados.
+- **Conflito ao criar `conectividade_id_seq`:** sessões concorrentes podiam
+  tentar criar a sequência `SERIAL` ao mesmo tempo. O lock transacional agora
+  faz as inicializações aguardarem umas às outras.
 
 Esses erros mostram que conexão de rede, autenticação e execução de SQL são
 etapas diferentes. O log mais interno costuma indicar em qual delas ocorreu a

@@ -288,6 +288,7 @@ def init_db():
     """Inicializa todas as tabelas e roda as migrations no Supabase"""
     with engine.begin() as conn:
         cursor = PostgresCursorAdapter(conn)
+        cursor.execute("SELECT pg_advisory_xact_lock(74120311)")
 
         # 1. Conectividade & Links
         cursor.execute("""
@@ -531,6 +532,9 @@ def init_db():
                 "solicitacao_4g": "TEXT",
                 "protocolo_4g": "TEXT",
                 "status_chamado_4g": "TEXT"
+            },
+            "problemas_glpi": {
+                "data_resolucao": "TIMESTAMP"
             }
         }
 
