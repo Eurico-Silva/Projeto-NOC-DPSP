@@ -74,13 +74,18 @@ class DatabaseRow(tuple):
 class ResultAdapter:
     def __init__(self, result):
         self.result = result
-        self.keys = tuple(result.keys())
+        self.returns_rows = result.returns_rows
+        self.keys = tuple(result.keys()) if self.returns_rows else ()
 
     def fetchone(self):
+        if not self.returns_rows:
+            return None
         row = self.result.fetchone()
         return DatabaseRow(row, self.keys) if row is not None else None
 
     def fetchall(self):
+        if not self.returns_rows:
+            return []
         return [DatabaseRow(row, self.keys) for row in self.result.fetchall()]
 
     @property
