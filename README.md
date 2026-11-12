@@ -1,6 +1,9 @@
 # central-comando-operacional
 Aplicação Streamlit para passagem de turno da Central de Comando
 
+Para entender a arquitetura da integração com o banco, o motivo das alterações
+e o papel de cada tecnologia, consulte [Documentação da integração com Supabase](docs/integracao-supabase.md).
+
 ## Banco de dados
 
 A aplicação usa PostgreSQL. No Supabase, abra **Connect**, selecione um pooler
